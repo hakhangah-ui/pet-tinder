@@ -22,8 +22,22 @@ import {
   SlidersHorizontal,
   Filter,
 } from "lucide-react";
-import { PetCardData } from "@/app/page";
 import { supabase } from "@/lib/supabase";
+
+export interface PetCardData {
+  id: string;
+  name: string;
+  age: string | number;
+  species: string;
+  breed: string;
+  vaccinated: boolean;
+  vaccineDetails?: string;
+  distance: string;
+  image: string;
+  bio?: string;
+  personality?: string[];
+  purpose?: string;
+}
 
 interface MatchTabProps {
   pets: PetCardData[];
@@ -660,7 +674,7 @@ function SwipeableCard({
 
         {/* Tags tính cách */}
         <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-          {pet.personality.map((tag) => (
+          {(pet.personality || []).map((tag: string) => (
             <span
               key={tag}
               className="text-xs px-2.5 py-0.5 rounded-full bg-neutral-900/70 border border-neutral-700/60 text-neutral-300 backdrop-blur-sm"
