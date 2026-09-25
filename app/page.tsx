@@ -1,16 +1,16 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Heart, X, Star, Volume2, VolumeX, MapPin, Search, 
   PlusCircle, ShieldCheck, Stethoscope, BookOpen, AlertTriangle, 
   MessageCircle, Share2, Flame, Music, Upload, CheckCircle2,
-  Filter, Sparkles
+  Sparkles, Lock, Mail, User, LogOut, KeyRound, ShieldAlert
 } from 'lucide-react'
 
-// --- DỮ LIỆU MẪU BAN ĐẦU ---
-const INITIAL_PETS = [
+// --- DỮ LIỆU MẪU BAN ĐẦU (NẾU CHƯA CÓ TRONG BỘ NHỚ) ---
+const DEFAULT_PETS = [
   {
     id: '1',
     name: 'Lu',
@@ -43,10 +43,9 @@ const SPECIES_CATEGORIES = [
   { id: 'bird', name: 'Chim & Bò sát', icon: '🦜' },
 ]
 
-const INITIAL_GUIDES = [
+const DEFAULT_GUIDES = [
   { id: 'g1', species: 'dog', author: 'Bác sĩ Thú y Tuấn', title: 'Lịch tiêm phòng chuẩn cho chó con dưới 1 tuổi', likes: 89, category: 'Y tế' },
   { id: 'g2', species: 'cat', author: 'Sen Cần Mẫn', title: 'Mẹo chữa tiêu chảy nhẹ cho mèo bằng men vi sinh', likes: 142, category: 'Kinh nghiệm' },
-  { id: 'g3', species: 'small', author: 'Hamster Club', title: 'Thức ăn chuẩn cho Hamster không bị béo phì', likes: 56, category: 'Dinh dưỡng' },
 ]
 
 const MUSIC_TRACKS = [
@@ -57,11 +56,26 @@ const MUSIC_TRACKS = [
 ]
 
 export default function PetTinderApp() {
+  // --- TRẠNG THÁI XÁC THỰC & ĐĂNG NHẬP ---
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  const [isAuthLoading, setIsAuthLoading] = useState(true)
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'verify'>('login')
+
+  // Form Đăng nhập / Đăng ký
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authName, setAuthName] = useState('')
+  const [otpInput, setOtpInput] = useState('')
+  const [generatedOtp, setGeneratedOtp] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [pendingUser, setPendingUser] = useState<any>(null)
+
+  // --- TRẠNG THÁI ỨNG DỤNG ---
   const [activeTab, setActiveTab] = useState<'match' | 'reels' | 'health' | 'lost'>('match')
-  const [pets, setPets] = useState(INITIAL_PETS)
+  const [pets, setPets] = useState<any[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   
-  // States cho Form Đăng Thú cưng
+  // Modals
   const [showAddPetModal, setShowAddPetModal] = useState(false)
   const [newPetName, setNewPetName] = useState('')
   const [newPetSpecies, setNewPetSpecies] = useState('Chó')
@@ -69,18 +83,139 @@ export default function PetTinderApp() {
   const [newPetAge, setNewPetAge] = useState('1')
   const [newPetImg, setNewPetImg] = useState('')
 
-  // States cho Cẩm nang & Kinh nghiệm
   const [selectedSpecies, setSelectedSpecies] = useState('all')
-  const [guides, setGuides] = useState(INITIAL_GUIDES)
+  const [guides, setGuides] = useState<any[]>([])
   const [showAddGuideModal, setShowAddGuideModal] = useState(false)
   const [newGuideTitle, setNewGuideTitle] = useState('')
 
-  // States cho Reels
   const [isMuted, setIsMuted] = useState(true)
   const [showUploadReelModal, setShowUploadReelModal] = useState(false)
   const [selectedMusic, setSelectedMusic] = useState(MUSIC_TRACKS[0])
 
-  // Xử lý Thêm Thú cưng mới vào Match
+  // --- TẢI VÀ LƯU DỮ LIỆU TỰ ĐỘNG (LOCALSTORAGE) ---
+  useEffect(() => {
+    // 1. Tải phiên đăng nhập cũ
+    const savedUser = localStorage.getItem('pettinder_session_user')
+    if (savedUser) {
+      try {
+        setCurrentUser(JSON.parse(savedUser))
+      } catch (e) {
+        localStorage.removeItem('pettinder_session_user')
+      }
+    }
+
+    // 2. Tải danh sách thú cưng
+    const savedPets = localStorage.getItem('pettinder_pets')
+    if (savedPets) {
+      try { setPets(JSON.parse(savedPets)) } catch (e) { setPets(DEFAULT_PETS) }
+    } else {
+      setPets(DEFAULT_PETS)
+      localStorage.setItem('pettinder_pets', JSON.stringify(DEFAULT_PETS))
+    }
+
+    // 3. Tải danh sách cẩm nang
+    const savedGuides = localStorage.getItem('pettinder_guides')
+    if (savedGuides) {
+      try { setGuides(JSON.parse(savedGuides)) } catch (e) { setGuides(DEFAULT_GUIDES) }
+    } else {
+      setGuides(DEFAULT_GUIDES)
+      localStorage.setItem('pettinder_guides', JSON.stringify(DEFAULT_GUIDES))
+    }
+
+    setIsAuthLoading(false)
+  }, [])
+
+  // --- XỬ LÝ ĐĂNG KÝ & BẢO MẬT XÁC THỰC ---
+  const handleRegister = (e: React.FormEvent) => {
+    e.preventDefault()
+    setAuthError('')
+
+    if (!authEmail || !authPassword || !authName) {
+      setAuthError('Vui lòng điền đầy đủ thông tin!')
+      return
+    }
+
+    // Kiểm tra xem email đã tồn tại trong danh sách người dùng chưa
+    const existingUsers = JSON.parse(localStorage.getItem('pettinder_db_users') || '[]')
+    const userExists = existingUsers.some((u: any) => u.email.toLowerCase() === authEmail.toLowerCase().trim())
+
+    if (userExists) {
+      setAuthError('Email này đã được đăng ký! Vui lòng chuyển sang Đăng nhập.')
+      return
+    }
+
+    // Tạo mã xác minh ngẫu thực (OTP 6 số)
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    setGeneratedOtp(otp)
+    setPendingUser({
+      name: authName,
+      email: authEmail.toLowerCase().trim(),
+      password: authPassword
+    })
+
+    // Chuyển sang màn hình xác minh mã bảo mật
+    setAuthMode('verify')
+  }
+
+  // Xử lý xác nhận OTP
+  const handleVerifyOtp = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (otpInput.trim() !== generatedOtp) {
+      setAuthError('Mã xác nhận không chính xác! Vui lòng thử lại.')
+      return
+    }
+
+    // Lưu người dùng mới vào CSDL vĩnh viễn
+    const existingUsers = JSON.parse(localStorage.getItem('pettinder_db_users') || '[]')
+    const newUser = { ...pendingUser, id: Date.now().toString() }
+    existingUsers.push(newUser)
+    localStorage.setItem('pettinder_db_users', JSON.stringify(existingUsers))
+
+    // Lưu phiên đăng nhập tự động
+    localStorage.setItem('pettinder_session_user', JSON.stringify(newUser))
+    setCurrentUser(newUser)
+    setAuthError('')
+    alert('Chúc mừng! Tài khoản của bạn đã được xác minh & khởi tạo thành công.')
+  }
+
+  // --- XỬ LÝ ĐĂNG NHẬP CHUẨN XÁC ---
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault()
+    setAuthError('')
+
+    const existingUsers = JSON.parse(localStorage.getItem('pettinder_db_users') || '[]')
+    const foundUser = existingUsers.find(
+      (u: any) => u.email.toLowerCase() === authEmail.toLowerCase().trim()
+    )
+
+    // Bắt lỗi nếu email chưa được đăng ký
+    if (!foundUser) {
+      setAuthError('⚠️ Email này CHƯA ĐƯỢC ĐĂNG KÝ! Vui lòng chọn "Đăng ký tài khoản" bên dưới.')
+      return
+    }
+
+    // Kiểm tra mật khẩu
+    if (foundUser.password !== authPassword) {
+      setAuthError('🔒 Mật khẩu không chính xác! Vui lòng kiểm tra lại.')
+      return
+    }
+
+    // Đăng nhập thành công -> Lưu session
+    localStorage.setItem('pettinder_session_user', JSON.stringify(foundUser))
+    setCurrentUser(foundUser)
+  }
+
+  // Đăng xuất
+  const handleLogout = () => {
+    if (confirm('Bạn có chắc chắn muốn đăng xuất tài khoản?')) {
+      localStorage.removeItem('pettinder_session_user')
+      setCurrentUser(null)
+      setAuthEmail('')
+      setAuthPassword('')
+    }
+  }
+
+  // --- XỬ LÝ THÊM THÚ CƯNG ---
   const handleCreatePet = (e: React.FormEvent) => {
     e.preventDefault()
     if (!newPetName || !newPetBreed) return
@@ -97,30 +232,222 @@ export default function PetTinderApp() {
       image: newPetImg || 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=600&q=75'
     }
 
-    setPets([createdPet, ...pets])
+    const updatedPets = [createdPet, ...pets]
+    setPets(updatedPets)
+    localStorage.setItem('pettinder_pets', JSON.stringify(updatedPets))
     setShowAddPetModal(false)
     setNewPetName('')
     setNewPetBreed('')
-    alert('Đã thêm thú cưng của bạn lên danh sách Match thành công!')
+    alert('Đã thêm thú cưng thành công và lưu vĩnh viễn!')
   }
 
-  // Xử lý Đăng bài chia sẻ Kinh nghiệm
+  // --- XỬ LÝ ĐĂNG CẨM NANG ---
   const handleCreateGuide = (e: React.FormEvent) => {
     e.preventDefault()
     if (!newGuideTitle) return
     const newG = {
       id: Date.now().toString(),
       species: selectedSpecies === 'all' ? 'dog' : selectedSpecies,
-      author: 'Bạn (Chủ nuôi)',
+      author: currentUser?.name || 'Bạn (Chủ nuôi)',
       title: newGuideTitle,
       likes: 1,
       category: 'Kinh nghiệm'
     }
-    setGuides([newG, ...guides])
+    const updatedGuides = [newG, ...guides]
+    setGuides(updatedGuides)
+    localStorage.setItem('pettinder_guides', JSON.stringify(updatedGuides))
     setShowAddGuideModal(false)
     setNewGuideTitle('')
   }
 
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <Sparkles className="w-8 h-8 text-pink-500 animate-spin" />
+      </div>
+    )
+  }
+
+  // --- 1. MÀN HÌNH BẢO MẬT ĐĂNG NHẬP / ĐĂNG KÝ (NẾU CHƯA DỰNG PHIÊN) ---
+  if (!currentUser) {
+    return (
+      <div className="flex justify-center items-center min-h-screen bg-neutral-950 text-white p-4 font-sans">
+        <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+          
+          <div className="flex flex-col items-center mb-6">
+            <div className="w-14 h-14 bg-pink-500/10 border border-pink-500/30 rounded-2xl flex items-center justify-center mb-2">
+              <Flame className="w-8 h-8 text-pink-500 fill-pink-500" />
+            </div>
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-pink-500 to-orange-400 bg-clip-text text-transparent">
+              PetTinder Security
+            </h1>
+            <p className="text-xs text-neutral-400 mt-1">Hệ thống Xác thực & Bảo mật Tài khoản</p>
+          </div>
+
+          {authError && (
+            <div className="mb-4 bg-red-500/10 border border-red-500/30 text-red-400 text-xs p-3 rounded-xl flex items-start gap-2">
+              <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          {/* FORM ĐĂNG NHẬP */}
+          {authMode === 'login' && (
+            <form onSubmit={handleLogin} className="space-y-3">
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">Email tài khoản:</label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 absolute left-3 top-3 text-neutral-500" />
+                  <input 
+                    type="email" 
+                    required 
+                    value={authEmail} 
+                    onChange={e => setAuthEmail(e.target.value)}
+                    placeholder="nhapemail@gmail.com" 
+                    className="w-full bg-neutral-800 border border-neutral-700 pl-9 pr-3 py-2.5 rounded-xl text-xs outline-none focus:border-pink-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">Mật khẩu:</label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3 top-3 text-neutral-500" />
+                  <input 
+                    type="password" 
+                    required 
+                    value={authPassword} 
+                    onChange={e => setAuthPassword(e.target.value)}
+                    placeholder="••••••••" 
+                    className="w-full bg-neutral-800 border border-neutral-700 pl-9 pr-3 py-2.5 rounded-xl text-xs outline-none focus:border-pink-500"
+                  />
+                </div>
+              </div>
+
+              <button type="submit" className="w-full bg-pink-600 hover:bg-pink-500 font-bold py-3 rounded-xl text-xs text-white transition shadow-lg shadow-pink-600/20">
+                Xác thực & Đăng nhập
+              </button>
+
+              <div className="text-center pt-2">
+                <button 
+                  type="button"
+                  onClick={() => { setAuthMode('register'); setAuthError(''); }}
+                  className="text-xs text-pink-400 hover:underline"
+                >
+                  Chưa có tài khoản? Đăng ký mới tại đây
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* FORM ĐĂNG KÝ TÀI KHOẢN MỚI */}
+          {authMode === 'register' && (
+            <form onSubmit={handleRegister} className="space-y-3">
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">Họ và tên chủ nuôi:</label>
+                <div className="relative">
+                  <User className="w-4 h-4 absolute left-3 top-3 text-neutral-500" />
+                  <input 
+                    type="text" 
+                    required 
+                    value={authName} 
+                    onChange={e => setAuthName(e.target.value)}
+                    placeholder="Nguyễn Văn A" 
+                    className="w-full bg-neutral-800 border border-neutral-700 pl-9 pr-3 py-2.5 rounded-xl text-xs outline-none focus:border-pink-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">Email đăng ký:</label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 absolute left-3 top-3 text-neutral-500" />
+                  <input 
+                    type="email" 
+                    required 
+                    value={authEmail} 
+                    onChange={e => setAuthEmail(e.target.value)}
+                    placeholder="chunuoi@gmail.com" 
+                    className="w-full bg-neutral-800 border border-neutral-700 pl-9 pr-3 py-2.5 rounded-xl text-xs outline-none focus:border-pink-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">Tạo mật khẩu:</label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3 top-3 text-neutral-500" />
+                  <input 
+                    type="password" 
+                    required 
+                    value={authPassword} 
+                    onChange={e => setAuthPassword(e.target.value)}
+                    placeholder="Tối thiểu 6 ký tự" 
+                    className="w-full bg-neutral-800 border border-neutral-700 pl-9 pr-3 py-2.5 rounded-xl text-xs outline-none focus:border-pink-500"
+                  />
+                </div>
+              </div>
+
+              <button type="submit" className="w-full bg-pink-600 hover:bg-pink-500 font-bold py-3 rounded-xl text-xs text-white transition">
+                Tiếp tục: Nhận mã xác minh OTP
+              </button>
+
+              <div className="text-center pt-2">
+                <button 
+                  type="button"
+                  onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                  className="text-xs text-neutral-400 hover:underline"
+                >
+                  Đã có tài khoản? Quay lại Đăng nhập
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* MÀN HÌNH XÁC MINH OTP BẢO MẬT */}
+          {authMode === 'verify' && (
+            <form onSubmit={handleVerifyOtp} className="space-y-3">
+              <div className="bg-pink-500/10 border border-pink-500/20 p-3 rounded-xl text-xs text-pink-300">
+                Mã xác minh bảo mật của bạn là: <strong className="text-base text-white underline tracking-widest">{generatedOtp}</strong>
+                <p className="text-[10px] text-neutral-400 mt-1">(Trong thực tế mã này sẽ gửi về Email {pendingUser?.email})</p>
+              </div>
+
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">Nhập mã OTP xác minh 6 số:</label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 absolute left-3 top-3 text-neutral-500" />
+                  <input 
+                    type="text" 
+                    required 
+                    maxLength={6}
+                    value={otpInput} 
+                    onChange={e => setOtpInput(e.target.value)}
+                    placeholder="123456" 
+                    className="w-full bg-neutral-800 border border-neutral-700 pl-9 pr-3 py-2.5 rounded-xl text-xs tracking-widest text-center font-bold outline-none focus:border-pink-500"
+                  />
+                </div>
+              </div>
+
+              <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 font-bold py-3 rounded-xl text-xs text-white transition">
+                Kích hoạt tài khoản & Vào ứng dụng
+              </button>
+
+              <button 
+                type="button"
+                onClick={() => setAuthMode('register')}
+                className="w-full text-xs text-neutral-400 hover:underline text-center block pt-1"
+              >
+                Hủy bỏ & Nhập lại thông tin
+              </button>
+            </form>
+          )}
+
+        </div>
+      </div>
+    )
+  }
+
+  // --- 2. GIAO DIỆN CHÍNH ỨNG DỤNG SAU KHI ĐÃ ĐĂNG NHẬP BẢO MẬT ---
   const currentPet = pets[currentIndex]
 
   return (
@@ -136,30 +463,31 @@ export default function PetTinderApp() {
             </span>
           </div>
           
-          {/* Nút Thêm Thú Cưng / Bài viết nhanh tùy vào Tab */}
-          {activeTab === 'match' && (
-            <button 
-              onClick={() => setShowAddPetModal(true)}
-              className="flex items-center gap-1.5 bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition shadow-lg shadow-pink-600/30"
-            >
-              <PlusCircle className="w-4 h-4" /> Đăng bé
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {activeTab === 'match' && (
+              <button 
+                onClick={() => setShowAddPetModal(true)}
+                className="flex items-center gap-1 bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold px-2.5 py-1.5 rounded-full transition shadow-lg shadow-pink-600/30"
+              >
+                <PlusCircle className="w-3.5 h-3.5" /> Đăng bé
+              </button>
+            )}
 
-          {activeTab === 'reels' && (
+            {/* Nút Đăng xuất an toàn */}
             <button 
-              onClick={() => setShowUploadReelModal(true)}
-              className="flex items-center gap-1 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition border border-neutral-700"
+              onClick={handleLogout}
+              title="Đăng xuất tài khoản"
+              className="p-1.5 bg-neutral-900 border border-neutral-800 hover:border-red-500/50 rounded-full text-neutral-400 hover:text-red-400 transition"
             >
-              <Upload className="w-4 h-4 text-pink-400" /> Đăng Reels
+              <LogOut className="w-4 h-4" />
             </button>
-          )}
+          </div>
         </header>
 
         {/* NỘI DUNG CHÍNH CÁC TAB */}
         <main className="flex-1 relative overflow-y-auto">
           
-          {/* --- TAB 1: GHÉP ĐÔI MATCH --- */}
+          {/* TAB 1: GHÉP ĐÔI MATCH */}
           {activeTab === 'match' && (
             <div className="h-full flex flex-col justify-between p-4">
               {currentPet ? (
@@ -191,7 +519,7 @@ export default function PetTinderApp() {
                         <span className="flex items-center gap-1 text-pink-400"><MapPin className="w-3.5 h-3.5" /> {currentPet.distance}</span>
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {currentPet.tags.map((tag, idx) => (
+                        {currentPet.tags.map((tag: string, idx: number) => (
                           <span key={idx} className="bg-neutral-800/80 backdrop-blur-md text-xs px-2.5 py-1 rounded-lg text-neutral-200">
                             #{tag}
                           </span>
@@ -210,7 +538,7 @@ export default function PetTinderApp() {
                 </div>
               )}
 
-              {/* BỘ NÚT TƯƠNG TÁC */}
+              {/* NÚT TƯƠNG TÁC */}
               <div className="flex justify-center items-center gap-5 my-2">
                 <button 
                   onClick={() => setCurrentIndex(prev => (prev + 1) % pets.length)} 
@@ -228,7 +556,7 @@ export default function PetTinderApp() {
             </div>
           )}
 
-          {/* --- TAB 2: PET REELS TỐI ƯU LOAD & ĐĂNG NHẠC --- */}
+          {/* TAB 2: REELS */}
           {activeTab === 'reels' && (
             <div className="h-full w-full relative bg-neutral-950 flex flex-col justify-between">
               <video 
@@ -237,7 +565,6 @@ export default function PetTinderApp() {
                 autoPlay 
                 loop 
                 muted={isMuted}
-                preload="metadata"
                 playsInline
               />
               <button 
@@ -252,15 +579,11 @@ export default function PetTinderApp() {
                   <div className="bg-neutral-800/80 p-3 rounded-full backdrop-blur-md"><Heart className="w-5 h-5 text-pink-500 fill-pink-500" /></div>
                   <span>2.4k</span>
                 </button>
-                <button className="flex flex-col items-center text-xs gap-1">
-                  <div className="bg-neutral-800/80 p-3 rounded-full backdrop-blur-md"><MessageCircle className="w-5 h-5 text-white" /></div>
-                  <span>128</span>
-                </button>
               </div>
 
               <div className="absolute bottom-4 left-4 right-16 z-10 bg-black/40 p-3 rounded-2xl backdrop-blur-md">
-                <h4 className="font-bold text-sm mb-1">@Mochi_Corgi</h4>
-                <p className="text-xs text-neutral-200 mb-2">Hôm nay đưa Mochi đi dạo công viên 🐶</p>
+                <h4 className="font-bold text-sm mb-1">@{currentUser?.name}</h4>
+                <p className="text-xs text-neutral-200 mb-2">Đưa Mochi đi dạo công viên 🐶</p>
                 <div className="flex items-center gap-1.5 text-[11px] text-pink-300">
                   <Music className="w-3.5 h-3.5 animate-spin" />
                   <span>{selectedMusic}</span>
@@ -269,13 +592,11 @@ export default function PetTinderApp() {
             </div>
           )}
 
-          {/* --- TAB 3: Y TẾ & ĐA DẠNG CẨM NANG HƯỚNG DẪN --- */}
+          {/* TAB 3: CẨM NANG Y TẾ */}
           {activeTab === 'health' && (
             <div className="p-4 space-y-4">
-              
-              {/* THANH LỌC THÚ CƯNG TRUYÊN SÂU */}
               <div>
-                <span className="text-xs text-neutral-400 font-semibold mb-2 block">CHỌN LOÀI THÚ CƯNG:</span>
+                <span className="text-xs text-neutral-400 font-semibold mb-2 block">LỌC THEO LOÀI:</span>
                 <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
                   {SPECIES_CATEGORIES.map(spec => (
                     <button
@@ -292,11 +613,10 @@ export default function PetTinderApp() {
                 </div>
               </div>
 
-              {/* NÚT VIẾT BÀI CHIA SẺ KINH NGHIỆM */}
               <div className="flex justify-between items-center bg-gradient-to-r from-pink-900/30 to-purple-900/30 p-3.5 rounded-2xl border border-pink-500/20">
                 <div>
-                  <h4 className="text-xs font-bold text-pink-300">Cộng đồng Chia sẻ Kinh nghiệm</h4>
-                  <p className="text-[11px] text-neutral-400">Bạn có mẹo chăm sóc hay? Hãy đăng bài nhé!</p>
+                  <h4 className="text-xs font-bold text-pink-300">Cộng đồng Pet Lovers</h4>
+                  <p className="text-[11px] text-neutral-400">Chia sẻ kinh nghiệm nuôi bé của bạn</p>
                 </div>
                 <button 
                   onClick={() => setShowAddGuideModal(true)}
@@ -306,11 +626,7 @@ export default function PetTinderApp() {
                 </button>
               </div>
 
-              {/* DANH SÁCH CẨM NANG */}
               <div className="space-y-2.5">
-                <h3 className="font-bold text-sm text-neutral-300 flex items-center gap-1.5">
-                  <BookOpen className="w-4 h-4 text-pink-400" /> Hướng dẫn & Kinh nghiệm
-                </h3>
                 {guides
                   .filter(g => selectedSpecies === 'all' || g.species === selectedSpecies)
                   .map(guide => (
@@ -320,23 +636,18 @@ export default function PetTinderApp() {
                         <span className="text-neutral-500">Tác giả: {guide.author}</span>
                       </div>
                       <h4 className="font-semibold text-xs leading-snug">{guide.title}</h4>
-                      <div className="flex items-center gap-3 text-[11px] text-neutral-400 pt-1">
-                        <span className="flex items-center gap-1"><Heart className="w-3.5 h-3.5 text-pink-500" /> {guide.likes} yêu thích</span>
-                      </div>
                     </div>
                   ))}
               </div>
             </div>
           )}
 
-          {/* --- TAB 4: THÚ CƯNG ĐI LẠC --- */}
+          {/* TAB 4: ĐI LẠC */}
           {activeTab === 'lost' && (
             <div className="p-4 space-y-3">
-              <div className="flex justify-between items-center">
-                <h3 className="font-bold text-base text-amber-400 flex items-center gap-1.5">
-                  <AlertTriangle className="w-5 h-5" /> Tìm Thú Cưng Đi Lạc
-                </h3>
-              </div>
+              <h3 className="font-bold text-base text-amber-400 flex items-center gap-1.5">
+                <AlertTriangle className="w-5 h-5" /> Tìm Thú Cưng Đi Lạc
+              </h3>
               <div className="bg-neutral-900 border border-neutral-800 p-3.5 rounded-2xl flex gap-3">
                 <img src="https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=200&q=75" className="w-20 h-20 rounded-xl object-cover" />
                 <div className="flex-1 text-xs space-y-1">
@@ -351,7 +662,7 @@ export default function PetTinderApp() {
 
         </main>
 
-        {/* MODAL 1: ĐĂNG THÚ CƯNG MỚI LÊN MATCH */}
+        {/* MODAL 1: ĐĂNG THÚ CƯNG MỚI */}
         {showAddPetModal && (
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md z-40 p-5 flex flex-col justify-center">
             <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-5 space-y-3">
@@ -371,7 +682,6 @@ export default function PetTinderApp() {
                       <option value="Chó">Chó</option>
                       <option value="Mèo">Mèo</option>
                       <option value="Hamster">Hamster/Thỏ</option>
-                      <option value="Bò sát/Chim">Bò sát / Chim</option>
                     </select>
                   </div>
                   <div>
@@ -381,59 +691,31 @@ export default function PetTinderApp() {
                 </div>
                 <div>
                   <label className="block text-neutral-400 mb-1">Link ảnh đại diện (URL):</label>
-                  <input type="url" value={newPetImg} onChange={e=>setNewPetImg(e.target.value)} placeholder="Dán link ảnh từ điện thoại/mạng" className="w-full bg-neutral-800 p-2.5 rounded-xl border border-neutral-700 outline-none" />
+                  <input type="url" value={newPetImg} onChange={e=>setNewPetImg(e.target.value)} placeholder="Dán link ảnh" className="w-full bg-neutral-800 p-2.5 rounded-xl border border-neutral-700 outline-none" />
                 </div>
                 <button type="submit" className="w-full bg-pink-600 hover:bg-pink-500 font-bold py-3 rounded-xl text-white mt-2">
-                  Hoàn tất Đăng hồ sơ
+                  Lưu & Đăng bài
                 </button>
               </form>
             </div>
           </div>
         )}
 
-        {/* MODAL 2: ĐĂNG REELS & CHỌN NHẠC NỀN */}
-        {showUploadReelModal && (
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-md z-40 p-5 flex flex-col justify-center">
-            <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-5 space-y-3">
-              <div className="flex justify-between items-center border-b border-neutral-800 pb-2">
-                <h3 className="font-bold text-base text-pink-400">Đăng Pet Reel mới</h3>
-                <button onClick={() => setShowUploadReelModal(false)}><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-3 text-xs">
-                <div className="border-2 border-dashed border-neutral-700 p-6 rounded-2xl text-center cursor-pointer hover:border-pink-500 transition">
-                  <Upload className="w-8 h-8 text-neutral-400 mx-auto mb-2" />
-                  <p className="text-neutral-300 font-semibold">Chọn Video hoặc Ảnh từ thiết bị</p>
-                  <p className="text-[10px] text-neutral-500 mt-1">Hỗ trợ MP4, MOV, JPG, PNG</p>
-                </div>
-                <div>
-                  <label className="block text-neutral-400 mb-1">Chọn nhạc nền:</label>
-                  <select value={selectedMusic} onChange={e=>setSelectedMusic(e.target.value)} className="w-full bg-neutral-800 p-2.5 rounded-xl border border-neutral-700 outline-none">
-                    {MUSIC_TRACKS.map((m, i) => <option key={i} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <button onClick={() => { setShowUploadReelModal(false); alert('Đã tải thước phim lên thành công!'); }} className="w-full bg-pink-600 font-bold py-3 rounded-xl text-white">
-                  Xuất bản Reels
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL 3: VIẾT BÀI CHIA SẺ KINH NGHIỆM */}
+        {/* MODAL 2: VIẾT BÀI CHIA SẺ */}
         {showAddGuideModal && (
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md z-40 p-5 flex flex-col justify-center">
             <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-5 space-y-3">
               <div className="flex justify-between items-center border-b border-neutral-800 pb-2">
-                <h3 className="font-bold text-base text-pink-400">Chia sẻ kinh nghiệm nuôi bé</h3>
+                <h3 className="font-bold text-base text-pink-400">Chia sẻ kinh nghiệm</h3>
                 <button onClick={() => setShowAddGuideModal(false)}><X className="w-5 h-5" /></button>
               </div>
               <form onSubmit={handleCreateGuide} className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-neutral-400 mb-1">Tiêu đề chia sẻ / Mẹo hay:</label>
-                  <textarea rows={3} required value={newGuideTitle} onChange={e=>setNewGuideTitle(e.target.value)} placeholder="Ví dụ: Cách làm pate tươi tại nhà cho mèo siêu ngon..." className="w-full bg-neutral-800 p-2.5 rounded-xl border border-neutral-700 outline-none" />
+                  <label className="block text-neutral-400 mb-1">Tiêu đề chia sẻ:</label>
+                  <textarea rows={3} required value={newGuideTitle} onChange={e=>setNewGuideTitle(e.target.value)} placeholder="Nội dung bài viết..." className="w-full bg-neutral-800 p-2.5 rounded-xl border border-neutral-700 outline-none" />
                 </div>
                 <button type="submit" className="w-full bg-pink-600 font-bold py-3 rounded-xl text-white">
-                  Đăng bài viết
+                  Đăng bài
                 </button>
               </form>
             </div>
